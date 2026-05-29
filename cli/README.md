@@ -118,6 +118,23 @@ tokscale pricing status      # show state, source, cache age
 tokscale pricing disable     # opt back out
 ```
 
+### Cross-verify two sources (`pricing verify`)
+
+`tokscale pricing verify` fetches **both** LiteLLM and [models.dev](https://models.dev)
+and cross-checks them — pure deterministic code, no AI in the loop. A model is
+*verified* when both sources agree on its input/output rates (within a tolerance,
+default 1%); disagreements are reported, never silently resolved. LiteLLM stays the
+primary/shipped source; models.dev is only a second opinion.
+
+```bash
+tokscale pricing verify                  # summary + top conflicts
+tokscale pricing verify --tolerance 2    # loosen agreement to 2%
+```
+
+It writes a full report to `~/.config/tokscale/pricing-verification.json` and
+**exits non-zero if a flagship model** (the ids coding tools actually report —
+Claude/GPT/Gemini) disagrees, so it can gate CI.
+
 When enabled, the **daemon's nightly job** (never the parse path, never on
 startup) fetches the latest catalog into `~/.config/tokscale/pricing-cache.json`,
 which overlays — but never replaces — the bundled baseline. Safeguards:

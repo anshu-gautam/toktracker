@@ -32,6 +32,43 @@ function addTieredPricing(entry: ModelPricing, spec: Record<string, unknown>): v
     entry.priorityCacheReadPerMillion = perM(spec.cache_read_input_token_cost_priority)
 }
 
+// First-party providers win on id collisions, so a bare id like `claude-opus-4-8`
+// gets the canonical Anthropic price rather than a Bedrock/OpenRouter variant.
+const MODELSDEV_PROVIDER_PRIORITY = ['anthropic', 'openai', 'google', 'google-vertex', 'azure', 'xai', 'deepseek', 'mistral']
+const providerRank = (p: string): number => {
+  const i = MODELSDEV_PROVIDER_PRIORITY.indexOf(p)
+  return i === -1 ? MODELSDEV_PROVIDER_PRIORITY.length : i
+}
+
+/**
+ * Transforms models.dev's `api.json` (nested by provider; costs already in USD per
+ * MILLION tokens) into our flat PricingMap. Pure/deterministic — used only to
+ * cross-verify LiteLLM, never as the primary source (see pricing-reconcile.ts).
+ */
+export function transformModelsDev(api: Record<string, unknown>): PricingMap {
+  const out: PricingMap = {}
+  const providers = Object.keys(api).sort((a, b) => providerRank(a) - providerRank(b))
+  for (const pid of providers) {
+    const prov = api[pid] as { models?: Record<string, unknown> } | undefined
+    const models = prov?.models
+    if (!models || typeof models !== 'object') continue
+    for (const mid of Object.keys(models)) {
+      const m = models[mid] as { id?: string; cost?: Record<string, unknown> }
+      const c = m?.cost
+      if (!c || typeof c.input !== 'number' || typeof c.output !== 'number') continue
+      const key = m.id ?? mid
+      if (out[key]) continue // highest-priority provider already set this id
+      out[key] = {
+        inputPerMillion: c.input,
+        outputPerMillion: c.output,
+        cacheReadPerMillion: typeof c.cache_read === 'number' ? c.cache_read : 0,
+        cacheWritePerMillion: typeof c.cache_write === 'number' ? c.cache_write : 0,
+      }
+    }
+  }
+  return out
+}
+
 export function transformUpstream(upstream: Record<string, unknown>): PricingMap {
   const out: PricingMap = {}
   for (const [model, raw] of Object.entries(upstream)) {
